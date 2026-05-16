@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE `transaction` ADD COLUMN `recorder` VARCHAR(191) NULL;
+
+-- AlterTable
+ALTER TABLE `user` MODIFY `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);

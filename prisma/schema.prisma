@@ -22,6 +22,7 @@ model transaction {
   amount    Int
   purpose   String
   notes     String?
+  recorder  String?
   createdAt DateTime @default(now())
   userId    Int
   user      user     @relation(fields: [userId], references: [id], map: "Transaction_userId_fkey")
