@@ -8,10 +8,11 @@ datasource db {
 }
 
 model auditlog {
-  id     Int    @id @default(autoincrement())
-  action String
-  userId Int
-  user   user   @relation(fields: [userId], references: [id], map: "AuditLog_userId_fkey")
+  id        Int      @id @default(autoincrement())
+  action    String
+  userId    Int
+  createdAt DateTime @default(now())
+  user      user     @relation(fields: [userId], references: [id], map: "AuditLog_userId_fkey")
 
   @@index([userId], map: "AuditLog_userId_fkey")
 }
@@ -34,6 +35,7 @@ model user {
   id          Int           @id @default(autoincrement())
   username    String        @unique(map: "User_username_key")
   password    String
+  role        String        @default("pengurus")
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt @default(now())
   auditlog    auditlog[]
