@@ -94,12 +94,18 @@ app.get('/users', authenticateToken, async (req, res) => {
 
 module.exports = app;
 
+const DEPOSIT_PURPOSES = ['Deposit Anggota Baru', 'Denda Resign', 'Setoran', 'KTA Trans', 'Other'];
+const WITHDRAW_PURPOSES = ['Reimburse', 'Sponsorship', 'Gaji Pegawai', 'Pajak', 'Other'];
+
 // Endpoint transaksi: deposit
 app.post('/transaction/deposit', authenticateToken, async (req, res) => {
   const { amount, purpose, notes, recorder } = req.body;
   const userId = req.user.userId;
   if (!amount || !purpose) {
     return res.status(400).json({ error: 'amount, purpose required' });
+  }
+  if (!DEPOSIT_PURPOSES.includes(purpose)) {
+    return res.status(400).json({ error: `Keperluan tidak valid. Pilihan: ${DEPOSIT_PURPOSES.join(', ')}` });
   }
   try {
     const trx = await prisma.transaction.create({
@@ -125,6 +131,9 @@ app.post('/transaction/withdraw', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   if (!amount || !purpose) {
     return res.status(400).json({ error: 'amount, purpose required' });
+  }
+  if (!WITHDRAW_PURPOSES.includes(purpose)) {
+    return res.status(400).json({ error: `Keperluan tidak valid. Pilihan: ${WITHDRAW_PURPOSES.join(', ')}` });
   }
   try {
     const trx = await prisma.transaction.create({
@@ -203,6 +212,74 @@ app.get('/dashboard/summary', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Get dashboard summary failed' });
+  }
+});
+
+// Endpoint data grafik bulanan dan distribusi keperluan
+app.get('/dashboard/graphic', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const startDate = req.query.startDate ? new Date(req.query.startDate) : null;
+    const endDate = req.query.endDate ? new Date(req.query.endDate + 'T23:59:59') : null;
+
+    // Data bulanan: difilter berdasarkan tahun
+    const monthlyTransactions = await prisma.transaction.findMany({
+      where: {
+        userId: Number(userId),
+        createdAt: {
+          gte: new Date(`${year}-01-01`),
+          lt: new Date(`${year + 1}-01-01`),
+        },
+      },
+    });
+
+    // Data pie: difilter berdasarkan startDate/endDate (jika tidak diisi, fallback ke tahun)
+    const pieWhere = { userId: Number(userId), createdAt: {} };
+    if (startDate || endDate) {
+      if (startDate) pieWhere.createdAt.gte = startDate;
+      if (endDate) pieWhere.createdAt.lte = endDate;
+    } else {
+      pieWhere.createdAt = {
+        gte: new Date(`${year}-01-01`),
+        lt: new Date(`${year + 1}-01-01`),
+      };
+    }
+    const pieTransactions = await prisma.transaction.findMany({ where: pieWhere });
+
+    // Hitung data bulanan
+    const monthlyDeposit = Array(12).fill(0);
+    const monthlyWithdraw = Array(12).fill(0);
+    for (const trx of monthlyTransactions) {
+      const month = new Date(trx.createdAt).getMonth();
+      if (trx.type === 'deposit') monthlyDeposit[month] += Number(trx.amount);
+      else if (trx.type === 'withdraw') monthlyWithdraw[month] += Number(trx.amount);
+    }
+
+    // Hitung distribusi keperluan
+    const depositPurposeMap = {};
+    const withdrawPurposeMap = {};
+    for (const p of DEPOSIT_PURPOSES) depositPurposeMap[p] = 0;
+    for (const p of WITHDRAW_PURPOSES) withdrawPurposeMap[p] = 0;
+
+    for (const trx of pieTransactions) {
+      if (trx.type === 'deposit' && DEPOSIT_PURPOSES.includes(trx.purpose)) {
+        depositPurposeMap[trx.purpose] += Number(trx.amount);
+      } else if (trx.type === 'withdraw' && WITHDRAW_PURPOSES.includes(trx.purpose)) {
+        withdrawPurposeMap[trx.purpose] += Number(trx.amount);
+      }
+    }
+
+    res.json({
+      monthlyDeposit,
+      monthlyWithdraw,
+      depositPurposeLabels: DEPOSIT_PURPOSES,
+      depositPurposeValues: DEPOSIT_PURPOSES.map(p => depositPurposeMap[p]),
+      withdrawPurposeLabels: WITHDRAW_PURPOSES,
+      withdrawPurposeValues: WITHDRAW_PURPOSES.map(p => withdrawPurposeMap[p]),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Get graphic data failed' });
   }
 });
 
