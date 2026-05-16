@@ -80,11 +80,23 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
+// Endpoint daftar semua user (untuk recorder dropdown)
+app.get('/users', authenticateToken, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: { id: true, username: true }
+    });
+    res.json(users.map(u => ({ id: u.id, name: u.username })));
+  } catch (err) {
+    res.status(500).json({ error: 'Get users failed' });
+  }
+});
+
 module.exports = app;
 
 // Endpoint transaksi: deposit
 app.post('/transaction/deposit', authenticateToken, async (req, res) => {
-  const { amount, purpose, notes } = req.body;
+  const { amount, purpose, notes, recorder } = req.body;
   const userId = req.user.userId;
   if (!amount || !purpose) {
     return res.status(400).json({ error: 'amount, purpose required' });
@@ -96,6 +108,7 @@ app.post('/transaction/deposit', authenticateToken, async (req, res) => {
         amount: Number(amount),
         purpose,
         notes,
+        recorder: recorder || null,
         userId: Number(userId)
       }
     });
@@ -108,7 +121,7 @@ app.post('/transaction/deposit', authenticateToken, async (req, res) => {
 
 // Endpoint transaksi: withdraw
 app.post('/transaction/withdraw', authenticateToken, async (req, res) => {
-  const { amount, purpose, notes } = req.body;
+  const { amount, purpose, notes, recorder } = req.body;
   const userId = req.user.userId;
   if (!amount || !purpose) {
     return res.status(400).json({ error: 'amount, purpose required' });
@@ -120,6 +133,7 @@ app.post('/transaction/withdraw', authenticateToken, async (req, res) => {
         amount: Number(amount),
         purpose,
         notes,
+        recorder: recorder || null,
         userId: Number(userId)
       }
     });
