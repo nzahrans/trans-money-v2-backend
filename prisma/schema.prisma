@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  url = env("DATABASE_URL")
+  provider = "mysql"
+}
+
+model auditlog {
+  id     Int    @id @default(autoincrement())
+  action String
+  userId Int
+  user   user   @relation(fields: [userId], references: [id], map: "AuditLog_userId_fkey")
+
+  @@index([userId], map: "AuditLog_userId_fkey")
+}
+
+model transaction {
+  id        Int      @id @default(autoincrement())
+  type      String
+  amount    Int
+  purpose   String
+  notes     String?
+  createdAt DateTime @default(now())
+  userId    Int
+  user      user     @relation(fields: [userId], references: [id], map: "Transaction_userId_fkey")
+
+  @@index([userId], map: "Transaction_userId_fkey")
+}
+
+model user {
+  id          Int           @id @default(autoincrement())
+  username    String        @unique(map: "User_username_key")
+  password    String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt @default(now())
+  auditlog    auditlog[]
+  transaction transaction[]
+}
