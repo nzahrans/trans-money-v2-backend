@@ -64,7 +64,8 @@ app.post('/auth/register', async (req, res) => {
     await logAudit(user.id, 'register');
     res.status(201).json({ id: user.id, username: user.username, name: user.name });
   } catch (err) {
-    res.status(500).json({ error: 'Registration failed' });
+    console.error('Registration error details:', err);
+    res.status(500).json({ error: 'Registration failed', details: err.message || String(err) });
   }
 });
 
