@@ -2,6 +2,7 @@
 CREATE TABLE `user` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `username` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(191) NULL,
     `password` VARCHAR(191) NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
@@ -17,6 +18,7 @@ CREATE TABLE `transaction` (
     `amount` INTEGER NOT NULL,
     `purpose` VARCHAR(191) NOT NULL,
     `notes` VARCHAR(191) NULL,
+    `transactionDate` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `userId` INTEGER NOT NULL,
 
@@ -37,4 +39,5 @@ ALTER TABLE `transaction` ADD CONSTRAINT `Transaction_userId_fkey` FOREIGN KEY (
 
 -- AddForeignKey
 ALTER TABLE `auditlog` ADD CONSTRAINT `AuditLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
 
