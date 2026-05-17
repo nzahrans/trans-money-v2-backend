@@ -1,5 +1,5 @@
 -- CreateTable
-CREATE TABLE `User` (
+CREATE TABLE `user` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `username` VARCHAR(191) NOT NULL,
     `password` VARCHAR(191) NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE `User` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `Transaction` (
+CREATE TABLE `transaction` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `type` VARCHAR(191) NOT NULL,
     `amount` INTEGER NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE `Transaction` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `AuditLog` (
+CREATE TABLE `auditlog` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `action` VARCHAR(191) NOT NULL,
     `userId` INTEGER NOT NULL,
@@ -33,7 +33,8 @@ CREATE TABLE `AuditLog` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
-ALTER TABLE `Transaction` ADD CONSTRAINT `Transaction_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `transaction` ADD CONSTRAINT `Transaction_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `AuditLog` ADD CONSTRAINT `AuditLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `auditlog` ADD CONSTRAINT `AuditLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
