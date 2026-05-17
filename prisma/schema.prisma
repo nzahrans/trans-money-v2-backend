@@ -9,8 +9,8 @@ datasource db {
 
 model auditlog {
   id        Int      @id @default(autoincrement())
-  action    String
   userId    Int
+  action    String
   createdAt DateTime @default(now())
   user      user     @relation(fields: [userId], references: [id], map: "AuditLog_userId_fkey")
 
@@ -18,15 +18,16 @@ model auditlog {
 }
 
 model transaction {
-  id        Int      @id @default(autoincrement())
-  type      String
-  amount    Int
-  purpose   String
-  notes     String?
-  recorder  String?
-  createdAt DateTime @default(now())
-  userId    Int
-  user      user     @relation(fields: [userId], references: [id], map: "Transaction_userId_fkey")
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  recorder        String?
+  type            String
+  amount          Int
+  purpose         String
+  notes           String?
+  transactionDate DateTime?
+  createdAt       DateTime  @default(now())
+  user            user      @relation(fields: [userId], references: [id], map: "Transaction_userId_fkey")
 
   @@index([userId], map: "Transaction_userId_fkey")
 }
@@ -34,6 +35,7 @@ model transaction {
 model user {
   id          Int           @id @default(autoincrement())
   username    String        @unique(map: "User_username_key")
+  name        String?
   password    String
   role        String        @default("pengurus")
   createdAt   DateTime      @default(now())
