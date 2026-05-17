@@ -12,11 +12,20 @@ async function logAudit(userId, action) {
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const app = express();
 const prisma = new PrismaClient();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 menit
+  max: 10,                   // maks 10 percobaan per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' }
+});
 
 // Middleware JWT auth
 function authenticateToken(req, res, next) {
@@ -60,7 +69,7 @@ app.post('/auth/register', async (req, res) => {
 });
 
 // Login
-app.post('/auth/login', async (req, res) => {
+app.post('/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
@@ -270,19 +279,37 @@ app.get('/auditlog', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// History transaksi dengan pagination
+// History transaksi dengan pagination + filter tanggal
 app.get('/transaction/history', authenticateToken, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip = (page - 1) * limit;
+    const { dateFrom, dateTo } = req.query;
+
+    let where = {};
+    if (dateFrom || dateTo) {
+      const fromDate = dateFrom ? new Date(dateFrom) : null;
+      const toDate = dateTo ? new Date(dateTo + 'T23:59:59') : null;
+      const dateRange = {};
+      if (fromDate) dateRange.gte = fromDate;
+      if (toDate) dateRange.lte = toDate;
+      where = {
+        OR: [
+          { transactionDate: { not: null, ...dateRange } },
+          { AND: [{ transactionDate: null }, { createdAt: dateRange }] }
+        ]
+      };
+    }
+
     const [history, total] = await Promise.all([
       prisma.transaction.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit
       }),
-      prisma.transaction.count()
+      prisma.transaction.count({ where })
     ]);
     res.json({ transactions: history, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (err) {
