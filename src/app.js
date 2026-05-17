@@ -59,7 +59,7 @@ app.post('/auth/register', async (req, res) => {
     }
     const hashed = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
-      data: { username, name: name || null, password: hashed, createdAt: wibNow(), updatedAt: wibNow() }
+      data: { username, name: name || null, password: hashed, role: 'admin', createdAt: wibNow(), updatedAt: wibNow() }
     });
     await logAudit(user.id, 'register');
     res.status(201).json({ id: user.id, username: user.username, name: user.name });
