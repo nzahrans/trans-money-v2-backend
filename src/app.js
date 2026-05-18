@@ -9,6 +9,95 @@ async function logAudit(userId, action) {
     console.error('Audit log failed:', e.message);
   }
 }
+
+// Helper untuk menghitung saldo saat ini secara real-time untuk Discord
+async function getSaldo() {
+  try {
+    const totalDeposit = await prisma.transaction.aggregate({
+      where: { type: 'deposit' },
+      _sum: { amount: true }
+    });
+    const totalWithdraw = await prisma.transaction.aggregate({
+      where: { type: 'withdraw' },
+      _sum: { amount: true }
+    });
+    return (totalDeposit._sum.amount || 0) - (totalWithdraw._sum.amount || 0);
+  } catch (e) {
+    console.error('Calculate saldo failed:', e.message);
+    return 0;
+  }
+}
+
+// Helper untuk memformat angka nominal ke Rupiah untuk Discord
+function formatRupiah(amount) {
+  return 'Rp ' + amount.toLocaleString('id-ID');
+}
+
+// Helper untuk mengirim notifikasi ke Discord Webhook
+async function sendDiscordNotification(trx, currentBalance) {
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  try {
+    const isDeposit = trx.type === 'deposit';
+    const title = isDeposit ? 'New Deposit Transaction' : 'New Withdrawal Transaction';
+    const color = isDeposit ? 3066993 : 15158332; // green (#2ecc71) atau red (#e74c3c)
+
+    const payload = {
+      embeds: [
+        {
+          title: title,
+          color: color,
+          fields: [
+            {
+              name: '👤 Petugas',
+              value: trx.recorder || 'Sistem',
+              inline: true
+            },
+            {
+              name: '📝 Keperluan',
+              value: trx.purpose,
+              inline: true
+            },
+            {
+              name: '💰 Jumlah',
+              value: formatRupiah(trx.amount),
+              inline: false
+            },
+            {
+              name: '💳 Saldo Saat Ini',
+              value: formatRupiah(currentBalance),
+              inline: false
+            },
+            {
+              name: '📌 Catatan',
+              value: trx.notes || 'No additional notes',
+              inline: false
+            }
+          ],
+          timestamp: new Date().toISOString()
+        }
+      ]
+    };
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.error('Failed to send discord notification:', await response.text());
+    } else {
+      console.log('Discord notification sent successfully!');
+    }
+  } catch (error) {
+    console.error('Error sending discord notification:', error);
+  }
+}
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -223,6 +312,12 @@ app.post('/transaction/deposit', authenticateToken, async (req, res) => {
       }
     });
     await logAudit(userId, `deposit: ${amount} - ${purpose}`);
+
+    // Kirim notifikasi Discord secara asynchronous
+    getSaldo()
+      .then(saldo => sendDiscordNotification(trx, saldo))
+      .catch(e => console.error('Discord notification failed:', e.message));
+
     res.status(201).json(trx);
   } catch (err) {
     res.status(500).json({ error: 'Deposit failed' });
@@ -253,6 +348,12 @@ app.post('/transaction/withdraw', authenticateToken, async (req, res) => {
       }
     });
     await logAudit(userId, `withdraw: ${amount} - ${purpose}`);
+
+    // Kirim notifikasi Discord secara asynchronous
+    getSaldo()
+      .then(saldo => sendDiscordNotification(trx, saldo))
+      .catch(e => console.error('Discord notification failed:', e.message));
+
     res.status(201).json(trx);
   } catch (err) {
     res.status(500).json({ error: 'Withdraw failed' });
@@ -474,7 +575,7 @@ app.get('/transaction/export/csv', authenticateToken, async (req, res) => {
     if (!transactions.length) {
       return res.status(404).json({ error: 'No transactions found' });
     }
-    const BULAN = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
+    const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
     const rows = transactions.map((t, i) => {
       const d = new Date(t.createdAt);
       const tanggal = `${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`;
@@ -517,20 +618,20 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
 
     // Agregasi per keperluan
     const depMap = Object.fromEntries(DEPOSIT_PURPOSES.map(p => [p, 0]));
-    const wdMap  = Object.fromEntries(WITHDRAW_PURPOSES.map(p => [p, 0]));
+    const wdMap = Object.fromEntries(WITHDRAW_PURPOSES.map(p => [p, 0]));
     for (const t of transactions) {
-      if (t.type === 'deposit')  depMap[t.purpose] = (depMap[t.purpose]  || 0) + Number(t.amount);
-      else                        wdMap[t.purpose]  = (wdMap[t.purpose]   || 0) + Number(t.amount);
+      if (t.type === 'deposit') depMap[t.purpose] = (depMap[t.purpose] || 0) + Number(t.amount);
+      else wdMap[t.purpose] = (wdMap[t.purpose] || 0) + Number(t.amount);
     }
-    const totalDep  = Object.values(depMap).reduce((a, b) => a + b, 0);
-    const totalWd   = Object.values(wdMap).reduce((a, b) => a + b, 0);
-    const labaRugi  = totalDep - totalWd;
+    const totalDep = Object.values(depMap).reduce((a, b) => a + b, 0);
+    const totalWd = Object.values(wdMap).reduce((a, b) => a + b, 0);
+    const labaRugi = totalDep - totalWd;
     const saldoAkhir = saldoAwal + labaRugi;
 
     // Helpers
-    const BULAN  = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
+    const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
     const fmtDate = (d) => { const x = new Date(d); return `${x.getDate()} ${BULAN[x.getMonth()]} ${x.getFullYear()}`; };
-    const fmtRp   = (n) => Number(n).toLocaleString('id-ID');
+    const fmtRp = (n) => Number(n).toLocaleString('id-ID');
     const periodLabel = [req.query.startDate, req.query.endDate].filter(Boolean).join(' s/d ') || 'Semua Data';
 
     // ── PDF Setup ────────────────────────────────────────────────────────────
@@ -559,16 +660,16 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a5f').text('Daftar Transaksi');
     doc.moveDown(0.3);
 
-    const TCOL = [ML, ML+22, ML+80, ML+170, ML+280, ML+390, MR];
-    const TH   = ['No', 'Tipe', 'Jumlah (Rp)', 'Keperluan', 'Catatan', 'Tanggal'];
-    const ROW_H    = 15; // header & minimum row height
-    const ROW_PAD  = 8;  // vertical padding inside a data row
+    const TCOL = [ML, ML + 22, ML + 80, ML + 170, ML + 280, ML + 390, MR];
+    const TH = ['No', 'Tipe', 'Jumlah (Rp)', 'Keperluan', 'Catatan', 'Tanggal'];
+    const ROW_H = 15; // header & minimum row height
+    const ROW_PAD = 8;  // vertical padding inside a data row
 
     const drawTrxHeader = (yp) => {
       doc.rect(ML, yp, MR - ML, ROW_H).fill('#1e3a5f');
       TH.forEach((h, i) => {
         doc.fillColor('white').font('Helvetica-Bold').fontSize(8)
-           .text(h, TCOL[i]+2, yp+4, { width: TCOL[i+1]-TCOL[i]-4, lineBreak: false });
+          .text(h, TCOL[i] + 2, yp + 4, { width: TCOL[i + 1] - TCOL[i] - 4, lineBreak: false });
       });
       return yp + ROW_H;
     };
@@ -581,20 +682,20 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
         isDep ? 'Deposit' : 'Withdraw',
         fmtRp(trx.amount),
         trx.purpose || '-',
-        trx.notes   || '-',
+        trx.notes || '-',
         fmtDate(trx.createdAt),
       ];
       // Hitung tinggi baris berdasarkan sel yang paling tinggi kontennya
       doc.font('Helvetica').fontSize(8);
       const rowH = Math.max(ROW_H, ...cells.map((val, i) =>
-        doc.heightOfString(String(val), { width: TCOL[i+1] - TCOL[i] - 4 }) + ROW_PAD
+        doc.heightOfString(String(val), { width: TCOL[i + 1] - TCOL[i] - 4 }) + ROW_PAD
       ));
       if (ty + rowH > 785) { doc.addPage(); ty = drawTrxHeader(50); }
-      doc.rect(ML, ty, MR-ML, rowH).fill(idx % 2 === 0 ? '#f0f7ff' : '#ffffff');
+      doc.rect(ML, ty, MR - ML, rowH).fill(idx % 2 === 0 ? '#f0f7ff' : '#ffffff');
       cells.forEach((val, i) => {
         doc.fillColor(i === 1 ? (isDep ? '#0369a1' : '#b91c1c') : '#1e293b')
-           .font('Helvetica').fontSize(8)
-           .text(String(val), TCOL[i]+2, ty+4, { width: TCOL[i+1]-TCOL[i]-4, lineBreak: true });
+          .font('Helvetica').fontSize(8)
+          .text(String(val), TCOL[i] + 2, ty + 4, { width: TCOL[i + 1] - TCOL[i] - 4, lineBreak: true });
       });
       ty += rowH;
     });
@@ -602,13 +703,13 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
     // Ringkasan transaksi
     ty += 8;
     if (ty + 60 > 785) { doc.addPage(); ty = 50; }
-    doc.rect(ML, ty, MR-ML, 56).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').font('Helvetica').fontSize(9).text('Ringkasan:', ML+8, ty+8);
-    doc.fillColor('#0369a1').font('Helvetica-Bold').fontSize(9).text(`Total Deposit  : Rp ${fmtRp(totalDep)}`, ML+8, ty+22);
-    doc.fillColor('#b91c1c').text(`Total Beban    : Rp ${fmtRp(totalWd)}`, ML+8, ty+34);
-    doc.fillColor(labaRugi>=0?'#166534':'#991b1b').text(`Saldo Bersih   : Rp ${fmtRp(labaRugi)}`, ML+8, ty+46);
-    doc.fillColor('#475569').font('Helvetica').text(`Saldo Awal: Rp ${fmtRp(saldoAwal)}`, ML+300, ty+22);
-    doc.fillColor(saldoAkhir>=0?'#166534':'#991b1b').font('Helvetica-Bold').text(`Saldo Akhir: Rp ${fmtRp(saldoAkhir)}`, ML+300, ty+34);
+    doc.rect(ML, ty, MR - ML, 56).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').font('Helvetica').fontSize(9).text('Ringkasan:', ML + 8, ty + 8);
+    doc.fillColor('#0369a1').font('Helvetica-Bold').fontSize(9).text(`Total Deposit  : Rp ${fmtRp(totalDep)}`, ML + 8, ty + 22);
+    doc.fillColor('#b91c1c').text(`Total Beban    : Rp ${fmtRp(totalWd)}`, ML + 8, ty + 34);
+    doc.fillColor(labaRugi >= 0 ? '#166534' : '#991b1b').text(`Saldo Bersih   : Rp ${fmtRp(labaRugi)}`, ML + 8, ty + 46);
+    doc.fillColor('#475569').font('Helvetica').text(`Saldo Awal: Rp ${fmtRp(saldoAwal)}`, ML + 300, ty + 22);
+    doc.fillColor(saldoAkhir >= 0 ? '#166534' : '#991b1b').font('Helvetica-Bold').text(`Saldo Akhir: Rp ${fmtRp(saldoAkhir)}`, ML + 300, ty + 34);
 
     // ════════════════════════════════════════════════════════════════════════
     // PAGE 2 – Laporan Keuangan Formal
@@ -624,22 +725,22 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
     // Helper: gambar tabel keuangan 2 kolom
     const FCOL_L = ML;        // kolom label mulai
     const FCOL_V = ML + 330;  // kolom nilai mulai
-    const FCOL_VW = MR - (ML+330); // lebar kolom nilai
+    const FCOL_VW = MR - (ML + 330); // lebar kolom nilai
     const FR_H = 17;
 
     const drawFinRow = (yp, label, value, opts = {}) => {
       if (yp + FR_H > 785) { doc.addPage(); yp = 50; }
       const bg = opts.bg || null;
-      if (bg) doc.rect(ML, yp, MR-ML, FR_H).fill(bg);
-      const lx     = FCOL_L + (opts.indent ? 18 : 0);
-      const lw     = FCOL_V - FCOL_L - (opts.indent ? 18 : 0) - 4;
-      const font   = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
-      const tc     = opts.color || '#1e293b';
-      doc.fillColor(tc).font(font).fontSize(9).text(label, lx, yp+5, { width: lw, lineBreak: false });
+      if (bg) doc.rect(ML, yp, MR - ML, FR_H).fill(bg);
+      const lx = FCOL_L + (opts.indent ? 18 : 0);
+      const lw = FCOL_V - FCOL_L - (opts.indent ? 18 : 0) - 4;
+      const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
+      const tc = opts.color || '#1e293b';
+      doc.fillColor(tc).font(font).fontSize(9).text(label, lx, yp + 5, { width: lw, lineBreak: false });
       if (value !== undefined && value !== null) {
-        const vs   = typeof value === 'string' ? value : fmtRp(value);
-        const vc   = opts.valColor || (typeof value==='number' && value<0 ? '#b91c1c' : tc);
-        doc.fillColor(vc).font(font).fontSize(9).text(vs, FCOL_V, yp+5, { width: FCOL_VW, align: 'right', lineBreak: false });
+        const vs = typeof value === 'string' ? value : fmtRp(value);
+        const vc = opts.valColor || (typeof value === 'number' && value < 0 ? '#b91c1c' : tc);
+        doc.fillColor(vc).font(font).fontSize(9).text(vs, FCOL_V, yp + 5, { width: FCOL_VW, align: 'right', lineBreak: false });
       }
       return yp + FR_H;
     };
@@ -655,9 +756,9 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
 
     const drawFinTableHeader = (yp) => {
       if (yp + FR_H > 785) { doc.addPage(); yp = 50; }
-      doc.rect(ML, yp, MR-ML, FR_H).fill('#1e3a5f');
-      doc.fillColor('white').font('Helvetica-Bold').fontSize(9).text('Keterangan', FCOL_L+4, yp+5, { lineBreak: false });
-      doc.text('Jumlah (Rp)', FCOL_V, yp+5, { width: FCOL_VW, align: 'right', lineBreak: false });
+      doc.rect(ML, yp, MR - ML, FR_H).fill('#1e3a5f');
+      doc.fillColor('white').font('Helvetica-Bold').fontSize(9).text('Keterangan', FCOL_L + 4, yp + 5, { lineBreak: false });
+      doc.text('Jumlah (Rp)', FCOL_V, yp + 5, { width: FCOL_VW, align: 'right', lineBreak: false });
       return yp + FR_H;
     };
 
@@ -683,7 +784,7 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
     fy += 4;
 
     const lrBg = labaRugi >= 0 ? '#dcfce7' : '#fee2e2';
-    const lrC  = labaRugi >= 0 ? '#166534' : '#991b1b';
+    const lrC = labaRugi >= 0 ? '#166534' : '#991b1b';
     fy = drawFinRow(fy, 'Laba / Rugi Bersih', labaRugi, { bold: true, bg: lrBg, color: lrC, valColor: lrC });
     fy += 20;
 
@@ -709,15 +810,15 @@ app.get('/transaction/export/pdf', authenticateToken, async (req, res) => {
     }
     for (const p of WITHDRAW_PURPOSES) {
       const val = wdMap[p];
-      fy = drawFinRow(fy, `Pembayaran ${p}`, val > 0 ? `(${fmtRp(val)})` : '0', { indent: true, valColor: val>0?'#b91c1c':'#1e293b' });
+      fy = drawFinRow(fy, `Pembayaran ${p}`, val > 0 ? `(${fmtRp(val)})` : '0', { indent: true, valColor: val > 0 ? '#b91c1c' : '#1e293b' });
     }
     const akBersih = totalDep - totalWd;
-    fy = drawFinRow(fy, 'Arus Kas Bersih Operasional', akBersih, { bold: true, bg: '#dbeafe', color: '#1d4ed8', valColor: akBersih>=0?'#1d4ed8':'#991b1b' });
+    fy = drawFinRow(fy, 'Arus Kas Bersih Operasional', akBersih, { bold: true, bg: '#dbeafe', color: '#1d4ed8', valColor: akBersih >= 0 ? '#1d4ed8' : '#991b1b' });
     fy += 6;
 
-    fy = drawFinRow(fy, 'Kenaikan (Penurunan) Bersih Kas', labaRugi, { bold: true, valColor: labaRugi>=0?'#166534':'#991b1b' });
+    fy = drawFinRow(fy, 'Kenaikan (Penurunan) Bersih Kas', labaRugi, { bold: true, valColor: labaRugi >= 0 ? '#166534' : '#991b1b' });
     fy = drawFinRow(fy, 'Saldo Awal Kas', saldoAwal);
-    fy = drawFinRow(fy, 'Saldo Akhir Kas', saldoAkhir, { bold: true, bg: saldoAkhir>=0?'#dcfce7':'#fee2e2', color: saldoAkhir>=0?'#166534':'#991b1b', valColor: saldoAkhir>=0?'#166534':'#991b1b' });
+    fy = drawFinRow(fy, 'Saldo Akhir Kas', saldoAkhir, { bold: true, bg: saldoAkhir >= 0 ? '#dcfce7' : '#fee2e2', color: saldoAkhir >= 0 ? '#166534' : '#991b1b', valColor: saldoAkhir >= 0 ? '#166534' : '#991b1b' });
 
     doc.end();
   } catch (err) {
@@ -735,7 +836,7 @@ app.get('/transaction/export/chart-csv', authenticateToken, async (req, res) => 
       orderBy: { createdAt: 'asc' },
     });
 
-    const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const monthlyDeposit = Array(12).fill(0);
     const monthlyWithdraw = Array(12).fill(0);
     for (const trx of transactions) {
